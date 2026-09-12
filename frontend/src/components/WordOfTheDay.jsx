@@ -1,4 +1,3 @@
-// frontend/src/components/WordOfTheDay.jsx
 import React, { useEffect, useState } from "react";
 import { Sparkles, Calendar, SearchCheck } from "lucide-react";
 import AudioPlayer from "./AudioPlayer";
@@ -20,8 +19,7 @@ export default function WordOfTheDay({ currentSearchedWord }) {
     };
     fetchDailyWord();
   }, []);
-
-  // Agar user ne search kiya hai toh searched word dikhao, warna default dailyWord dikhao
+  // if user search any word then show searched word otherwise show default dailyWord
   const displayWord = currentSearchedWord || dailyWord;
   const isSearchMode = Boolean(currentSearchedWord);
 

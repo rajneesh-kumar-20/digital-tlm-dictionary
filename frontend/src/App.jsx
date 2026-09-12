@@ -1,4 +1,3 @@
-// frontend/src/App.jsx
 import React from "react";
 import DictionarySearch from "./components/DictionarySearch";
 import ThemeToggle from "./components/ThemeToggle";

@@ -1,4 +1,3 @@
-// backend/models/Word.js
 const mongoose = require("mongoose");
 
 const WordSchema = new mongoose.Schema({

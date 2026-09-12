@@ -76,7 +76,7 @@ router.get("/search", async (req, res) => {
         .json({ success: false, message: "Query is required" });
     }
 
-    // A. Local DB Search
+    // Local DB Search
     let existingWord = await Word.findOne({ word: query });
     if (existingWord) {
       if (!existingWord.hindiMeaning) {

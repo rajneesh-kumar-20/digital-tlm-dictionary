@@ -1,4 +1,3 @@
-// src/components/RecentHistory.jsx
 import React from "react";
 import { History, Trash2 } from "lucide-react";
 

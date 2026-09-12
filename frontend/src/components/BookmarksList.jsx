@@ -1,4 +1,3 @@
-// src/components/BookmarksList.jsx
 import React from "react";
 import { Bookmark, X } from "lucide-react";
 
