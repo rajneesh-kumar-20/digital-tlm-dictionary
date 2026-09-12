@@ -1,3 +1,4 @@
+// frontend/src/components/DictionarySearch.jsx
 import React, { useState, useEffect, useRef } from "react";
 import {
   Search,
@@ -8,22 +9,61 @@ import {
   BookOpenCheck,
   Calendar,
   SearchCheck,
-  SearchCode,
+  Languages,
 } from "lucide-react";
 import { useDebounce } from "../hooks/useDebounce";
 import AudioPlayer from "./AudioPlayer";
 import BookmarksList from "./BookmarksList";
 import RecentHistory from "./RecentHistory";
 
+const SUPPORTED_LANGUAGES = [
+  { code: "hi", label: "हिन्दी (Hindi)" },
+  { code: "en", label: "English" },
+  { code: "pa", label: "ਪੰਜਾਬੀ (Punjabi)" },
+  { code: "ur", label: "اردو (Urdu)" },
+  { code: "bn", label: "বাংলা (Bengali)" },
+  { code: "mr", label: "मराठी (Marathi)" },
+  { code: "gu", label: "ગુજરાતી (Gujarati)" },
+  { code: "ta", label: "தமிழ் (Tamil)" },
+  { code: "te", label: "తెలుగు (Telugu)" },
+];
+
+const API_BASE_URL = "http://localhost:8080";
+
+// Client-side translation helper
+async function fetchClientTranslation(text, targetLang) {
+  if (!text || targetLang === "en") return text;
+  try {
+    const res = await fetch(
+      `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`,
+    );
+    const data = await res.json();
+    if (data && data[0] && Array.isArray(data[0])) {
+      return data[0]
+        .map((item) => item[0])
+        .filter(Boolean)
+        .join(" ");
+    }
+    return text;
+  } catch (err) {
+    return text;
+  }
+}
+
 export default function DictionarySearch() {
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedLang, setSelectedLang] = useState("hi");
   const [suggestions, setSuggestions] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedWord, setSelectedWord] = useState(null);
-  const [dailyWord, setDailyWord] = useState(null); // Default Daily Word
+  const [dailyWord, setDailyWord] = useState(null);
   const [dataSource, setDataSource] = useState("");
   const [loading, setLoading] = useState(false);
+  const [translating, setTranslating] = useState(false);
   const [error, setError] = useState("");
+
+  const [currentMeaningText, setCurrentMeaningText] = useState("");
+  const [translatedMeaningsList, setTranslatedMeaningsList] = useState([]);
 
   const [bookmarks, setBookmarks] = useState(() => {
     const saved = localStorage.getItem("dictionary_bookmarks");
@@ -38,13 +78,12 @@ export default function DictionarySearch() {
   const debouncedQuery = useDebounce(searchTerm, 300);
   const dropdownRef = useRef(null);
 
-  // 1. Initial Load par "Word of the Day" fetch karein
+  // 1. Initial Load: Word of the Day
   useEffect(() => {
-    const fetchDailyWord = async () => {
+    const getDailyWord = async () => {
       try {
-        const res = await fetch(
-          "http://localhost:8080/api/words/word-of-the-day",
-        );
+        const res = await fetch(`${API_BASE_URL}/api/words/word-of-the-day`);
+        if (!res.ok) throw new Error("API route issue");
         const data = await res.json();
         if (data.success) {
           setDailyWord(data.data);
@@ -53,7 +92,7 @@ export default function DictionarySearch() {
         console.error("Word of the day error:", err);
       }
     };
-    fetchDailyWord();
+    getDailyWord();
   }, []);
 
   useEffect(() => {
@@ -64,7 +103,7 @@ export default function DictionarySearch() {
     localStorage.setItem("dictionary_recent_history", JSON.stringify(history));
   }, [history]);
 
-  // Suggestions search
+  // 2. Suggestions Search
   useEffect(() => {
     const fetchSuggestions = async () => {
       if (!debouncedQuery.trim()) {
@@ -73,7 +112,7 @@ export default function DictionarySearch() {
       }
       try {
         const res = await fetch(
-          `http://localhost:8080/api/words/suggestions?q=${debouncedQuery}`,
+          `${API_BASE_URL}/api/words/suggestions?q=${encodeURIComponent(debouncedQuery)}`,
         );
         const data = await res.json();
         if (data.success) {
@@ -86,6 +125,71 @@ export default function DictionarySearch() {
     };
     fetchSuggestions();
   }, [debouncedQuery]);
+
+  const activeDisplayWord = selectedWord || dailyWord;
+
+  // 3. Full Translation Effect (Header + Part of Speech + Definitions + Examples)
+  useEffect(() => {
+    const translateAllContent = async () => {
+      if (!activeDisplayWord) return;
+      setTranslating(true);
+
+      try {
+        if (selectedLang === "hi" && activeDisplayWord.hindiMeaning) {
+          setCurrentMeaningText(activeDisplayWord.hindiMeaning);
+        } else {
+          const mainTrans = await fetchClientTranslation(
+            activeDisplayWord.word,
+            selectedLang,
+          );
+          setCurrentMeaningText(mainTrans);
+        }
+
+        if (selectedLang === "en") {
+          setTranslatedMeaningsList(activeDisplayWord.meanings || []);
+          setTranslating(false);
+          return;
+        }
+
+        if (
+          activeDisplayWord.meanings &&
+          activeDisplayWord.meanings.length > 0
+        ) {
+          const translatedList = await Promise.all(
+            activeDisplayWord.meanings.map(async (m) => {
+              const transPos = await fetchClientTranslation(
+                m.partOfSpeech,
+                selectedLang,
+              );
+              const transDefs = await Promise.all(
+                (m.definitions || []).map((def) =>
+                  fetchClientTranslation(def, selectedLang),
+                ),
+              );
+              const transExs = await Promise.all(
+                (m.examples || []).map((ex) =>
+                  fetchClientTranslation(ex, selectedLang),
+                ),
+              );
+
+              return {
+                partOfSpeech: transPos,
+                definitions: transDefs,
+                examples: transExs,
+              };
+            }),
+          );
+          setTranslatedMeaningsList(translatedList);
+        }
+      } catch (e) {
+        setTranslatedMeaningsList(activeDisplayWord.meanings || []);
+      } finally {
+        setTranslating(false);
+      }
+    };
+
+    translateAllContent();
+  }, [activeDisplayWord, selectedLang]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -105,7 +209,7 @@ export default function DictionarySearch() {
     });
   };
 
-  // Search Logic
+  // 4. Main Search Logic
   const fetchWordDetails = async (wordToFetch) => {
     const query = (wordToFetch || searchTerm).trim();
     if (!query) return;
@@ -116,15 +220,22 @@ export default function DictionarySearch() {
 
     try {
       const res = await fetch(
-        `http://localhost:8080/api/words/search?q=${encodeURIComponent(query)}`,
+        `${API_BASE_URL}/api/words/search?q=${encodeURIComponent(query)}`,
       );
+      const contentType = res.headers.get("content-type");
+
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new Error(
+          "Backend server se sahi connection nahi mil raha hai (Port 8080 check karein)",
+        );
+      }
+
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        throw new Error(data.message || "Word not found in dictionary");
+        throw new Error(data.message || "शब्द नहीं मिला");
       }
 
-      // Live update state
       setSelectedWord(data.data);
       setDataSource(data.source || "database");
       addToHistory(query);
@@ -145,16 +256,24 @@ export default function DictionarySearch() {
     }
   };
 
-  // Display target: Agar user ne search kiya hai toh selectedWord, warna default dailyWord
-  const activeDisplayWord = selectedWord || dailyWord;
   const isSearchMode = Boolean(selectedWord);
   const isCurrentBookmarked =
     activeDisplayWord &&
     bookmarks.includes(activeDisplayWord.word?.toLowerCase());
+  const currentLangObj =
+    SUPPORTED_LANGUAGES.find((l) => l.code === selectedLang) ||
+    SUPPORTED_LANGUAGES[0];
+
+  const meaningsToRender =
+    translatedMeaningsList.length > 0
+      ? translatedMeaningsList
+      : activeDisplayWord
+        ? activeDisplayWord.meanings
+        : [];
 
   return (
     <div>
-      {/* 1. Dynamic Hero Banner (Searched Word or Word of the Day) */}
+      {/* 1. Hero Card (Word of the Day / Searched Word) */}
       {activeDisplayWord && (
         <div className="mb-8 relative group">
           <div
@@ -168,12 +287,12 @@ export default function DictionarySearch() {
           <div className="relative rounded-3xl p-6 sm:p-7 bg-slate-900/90 backdrop-blur-xl border border-slate-800 shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               {isSearchMode ? (
-                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-md shadow-emerald-500/20">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-md">
                   <SearchCheck className="w-4 h-4 stroke-[2.5]" />
                   <span>खोजा गया शब्द • SEARCHED WORD</span>
                 </div>
               ) : (
-                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-md shadow-amber-500/20">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-md">
                   <Sparkles className="w-4 h-4 fill-current" />
                   <span>आज का शब्द • WORD OF THE DAY</span>
                 </div>
@@ -193,16 +312,25 @@ export default function DictionarySearch() {
                   <h3 className="text-3xl sm:text-4xl font-black text-white capitalize tracking-tight">
                     {activeDisplayWord.word}
                   </h3>
+
                   {activeDisplayWord.phonetic && (
                     <span className="text-sm font-mono text-indigo-400 bg-indigo-950/60 border border-indigo-800/50 px-2.5 py-0.5 rounded-lg">
                       {activeDisplayWord.phonetic}
                     </span>
                   )}
-                  {activeDisplayWord.hindiMeaning && (
-                    <span className="text-sm sm:text-base font-bold text-emerald-300 bg-emerald-950/60 border border-emerald-700/60 px-3.5 py-1 rounded-xl shadow-xs">
-                      हिन्दी अर्थ: {activeDisplayWord.hindiMeaning}
+
+                  {currentMeaningText && (
+                    <span className="text-sm sm:text-base font-bold text-emerald-300 bg-emerald-950/70 border border-emerald-600/70 px-4 py-1.5 rounded-xl shadow-md flex items-center gap-2">
+                      {translating && (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                      )}
+                      <span>
+                        {currentLangObj.label.split(" ")[0]} अर्थ:{" "}
+                        {currentMeaningText}
+                      </span>
                     </span>
                   )}
+
                   {isSearchMode && dataSource && (
                     <span
                       className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-semibold border ${
@@ -216,15 +344,14 @@ export default function DictionarySearch() {
                       ) : (
                         <Sparkles className="w-3.5 h-3.5" />
                       )}
-                      {dataSource === "database"
-                        ? "Local DB"
-                        : "Fetched & Cached"}
+                      {dataSource === "database" ? "Local DB" : "Live Fetched"}
                     </span>
                   )}
                 </div>
 
                 <p className="text-sm sm:text-base text-slate-300 line-clamp-2 max-w-xl leading-relaxed">
-                  {activeDisplayWord.meanings?.[0]?.definitions?.[0]}
+                  {meaningsToRender?.[0]?.definitions?.[0] ||
+                    activeDisplayWord.meanings?.[0]?.definitions?.[0]}
                 </p>
               </div>
 
@@ -261,14 +388,42 @@ export default function DictionarySearch() {
         </div>
       )}
 
-      {/* Search Bar */}
+      {/* 2. Language Selector & Search Form */}
       <div ref={dropdownRef} className="relative z-20">
+        <div className="flex items-center justify-between mb-3 px-1">
+          <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
+            <Languages className="w-4 h-4 text-indigo-400" />
+            <span>अर्थ एवं विवरण की भाषा:</span>
+            {translating && (
+              <span className="text-indigo-400 text-xs flex items-center gap-1">
+                <Loader2 className="w-3 h-3 animate-spin" /> अनुवाद हो रहा है...
+              </span>
+            )}
+          </div>
+
+          <select
+            value={selectedLang}
+            onChange={(e) => setSelectedLang(e.target.value)}
+            className="bg-slate-900 border border-indigo-500/50 text-indigo-300 font-semibold text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-md"
+          >
+            {SUPPORTED_LANGUAGES.map((lang) => (
+              <option
+                key={lang.code}
+                value={lang.code}
+                className="bg-slate-900 text-white"
+              >
+                {lang.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <form
           onSubmit={(e) => {
             e.preventDefault();
             fetchWordDetails();
           }}
-          className="relative flex items-center shadow-xl shadow-indigo-950/40 rounded-2xl bg-slate-900 border border-slate-800 p-2 transition-all focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/15"
+          className="relative flex items-center shadow-xl rounded-2xl bg-slate-900 border border-slate-800 p-2 transition-all focus-within:border-indigo-500 focus-within:ring-4 focus-within:ring-indigo-500/15"
         >
           <div className="pl-3.5 pr-2 text-slate-400">
             <Search className="w-5 h-5 text-indigo-400" />
@@ -276,7 +431,7 @@ export default function DictionarySearch() {
 
           <input
             type="text"
-            placeholder="शब्द खोजें (उदा. resilient, serendipity, eloquent)..."
+            placeholder="अंग्रेजी शब्द खोजें (उदा. urgent, achieve, diligent)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
@@ -296,7 +451,6 @@ export default function DictionarySearch() {
           </button>
         </form>
 
-        {/* Suggestions Dropdown */}
         {showDropdown && suggestions.length > 0 && (
           <ul className="absolute left-0 right-0 mt-2 bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-30 divide-y divide-slate-800/80">
             {suggestions.map((item, idx) => (
@@ -319,7 +473,6 @@ export default function DictionarySearch() {
           </ul>
         )}
 
-        {/* Recent History */}
         <RecentHistory
           history={history}
           onSelectWord={(w) => fetchWordDetails(w)}
@@ -327,7 +480,6 @@ export default function DictionarySearch() {
         />
       </div>
 
-      {/* Error Notice */}
       {error && (
         <div className="mt-6 p-4 rounded-2xl bg-rose-950/40 border border-rose-800 text-rose-300 text-sm flex items-center gap-3">
           <span className="text-xl">⚠️</span>
@@ -335,14 +487,14 @@ export default function DictionarySearch() {
         </div>
       )}
 
-      {/* 3. Detailed Meanings Section */}
-      {selectedWord && (
+      {/* 3. Detailed Meanings (All Multilingual) */}
+      {activeDisplayWord && (
         <div className="mt-8 space-y-4">
           <h4 className="text-sm font-semibold text-slate-400 uppercase tracking-wider pl-1">
             विस्तृत अर्थ एवं उदाहरण (Detailed Meanings)
           </h4>
 
-          {selectedWord.meanings.map((meaning, idx) => (
+          {meaningsToRender.map((meaning, idx) => (
             <div
               key={idx}
               className="p-6 rounded-2xl bg-slate-950/60 border border-slate-800/80 relative overflow-hidden group hover:border-slate-700/80 transition-all"
@@ -357,7 +509,7 @@ export default function DictionarySearch() {
               </div>
 
               <ul className="space-y-3 pl-2 text-slate-200 text-base leading-relaxed">
-                {meaning.definitions.map((def, dIdx) => (
+                {(meaning.definitions || []).map((def, dIdx) => (
                   <li key={dIdx} className="flex items-start gap-2.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-2 shrink-0"></span>
                     <span>{def}</span>
@@ -380,7 +532,7 @@ export default function DictionarySearch() {
         </div>
       )}
 
-      {/* 4. Bookmarks Section */}
+      {/* 4. Bookmarks */}
       <BookmarksList
         bookmarks={bookmarks}
         onSelectWord={(w) => fetchWordDetails(w)}
