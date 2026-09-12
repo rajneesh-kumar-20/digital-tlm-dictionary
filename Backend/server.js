@@ -30,8 +30,8 @@ app.use("/api/words", require("./routes/dictionaryRoutes"));
 const frontendDistPath = path.join(__dirname, "../frontend/dist");
 app.use(express.static(frontendDistPath));
 
-// 3. React SPA Fallback: Har page par index.html serve karega
-app.get("*", (req, res) => {
+// 3. React SPA Fallback (Express v5 Compatible Catch-all)
+app.use((req, res) => {
   res.sendFile(path.join(frontendDistPath, "index.html"));
 });
 
