@@ -18,7 +18,6 @@ import RecentHistory from "./RecentHistory";
 
 const SUPPORTED_LANGUAGES = [
   { code: "hi", label: "हिन्दी (Hindi)" },
-  { code: "en", label: "English" },
   { code: "pa", label: "ਪੰਜਾਬੀ (Punjabi)" },
   { code: "ur", label: "اردو (Urdu)" },
   { code: "bn", label: "বাংলা (Bengali)" },
@@ -26,11 +25,12 @@ const SUPPORTED_LANGUAGES = [
   { code: "gu", label: "ગુજરાતી (Gujarati)" },
   { code: "ta", label: "தமிழ் (Tamil)" },
   { code: "te", label: "తెలుగు (Telugu)" },
+  { code: "en", label: "English" },
 ];
 
-const API_BASE_URL = "http://localhost:8080";
+// Production me same domain se API call hogi
+const API_BASE_URL = "";
 
-// Client-side translation helper
 async function fetchClientTranslation(text, targetLang) {
   if (!text || targetLang === "en") return text;
   try {
@@ -78,12 +78,11 @@ export default function DictionarySearch() {
   const debouncedQuery = useDebounce(searchTerm, 300);
   const dropdownRef = useRef(null);
 
-  // 1. Initial Load: Word of the Day
   useEffect(() => {
     const getDailyWord = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/words/word-of-the-day`);
-        if (!res.ok) throw new Error("API route issue");
+        if (!res.ok) return;
         const data = await res.json();
         if (data.success) {
           setDailyWord(data.data);
@@ -103,7 +102,6 @@ export default function DictionarySearch() {
     localStorage.setItem("dictionary_recent_history", JSON.stringify(history));
   }, [history]);
 
-  // 2. Suggestions Search
   useEffect(() => {
     const fetchSuggestions = async () => {
       if (!debouncedQuery.trim()) {
@@ -128,7 +126,6 @@ export default function DictionarySearch() {
 
   const activeDisplayWord = selectedWord || dailyWord;
 
-  // 3. Full Translation Effect (Header + Part of Speech + Definitions + Examples)
   useEffect(() => {
     const translateAllContent = async () => {
       if (!activeDisplayWord) return;
@@ -209,7 +206,6 @@ export default function DictionarySearch() {
     });
   };
 
-  // 4. Main Search Logic
   const fetchWordDetails = async (wordToFetch) => {
     const query = (wordToFetch || searchTerm).trim();
     if (!query) return;
@@ -225,9 +221,7 @@ export default function DictionarySearch() {
       const contentType = res.headers.get("content-type");
 
       if (!contentType || !contentType.includes("application/json")) {
-        throw new Error(
-          "Backend server se sahi connection nahi mil raha hai (Port 8080 check karein)",
-        );
+        throw new Error("Server connection issue");
       }
 
       const data = await res.json();
@@ -273,7 +267,7 @@ export default function DictionarySearch() {
 
   return (
     <div>
-      {/* 1. Hero Card (Word of the Day / Searched Word) */}
+      {/* Hero Card */}
       {activeDisplayWord && (
         <div className="mb-8 relative group">
           <div
@@ -388,7 +382,7 @@ export default function DictionarySearch() {
         </div>
       )}
 
-      {/* 2. Language Selector & Search Form */}
+      {/* Language Selector & Search Form */}
       <div ref={dropdownRef} className="relative z-20">
         <div className="flex items-center justify-between mb-3 px-1">
           <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
@@ -487,7 +481,7 @@ export default function DictionarySearch() {
         </div>
       )}
 
-      {/* 3. Detailed Meanings (All Multilingual) */}
+      {/* Detailed Meanings */}
       {activeDisplayWord && (
         <div className="mt-8 space-y-4">
           <h4 className="text-sm font-semibold text-slate-400 uppercase tracking-wider pl-1">
@@ -532,7 +526,7 @@ export default function DictionarySearch() {
         </div>
       )}
 
-      {/* 4. Bookmarks */}
+      {/* Bookmarks */}
       <BookmarksList
         bookmarks={bookmarks}
         onSelectWord={(w) => fetchWordDetails(w)}
