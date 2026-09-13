@@ -31,18 +31,21 @@ const SUPPORTED_LANGUAGES = [
 
 const API_BASE_URL = "";
 
+// Translation helper: explicitly enforce English as source language
 async function fetchClientTranslation(text, targetLang) {
   if (!text) return "";
+  if (targetLang === "en") return text;
   try {
-    const res = await fetch(
-      `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`,
-    );
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url);
     const data = await res.json();
     if (data && data[0] && Array.isArray(data[0])) {
-      return data[0]
+      const translated = data[0]
         .map((item) => item[0])
         .filter(Boolean)
-        .join(" ");
+        .join(" ")
+        .trim();
+      return translated || text;
     }
     return text;
   } catch (err) {
@@ -52,7 +55,6 @@ async function fetchClientTranslation(text, targetLang) {
 
 export default function DictionarySearch() {
   const [searchTerm, setSearchTerm] = useState("");
-  // By default English selected rahegi
   const [selectedLang, setSelectedLang] = useState("en");
   const [suggestions, setSuggestions] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -127,45 +129,39 @@ export default function DictionarySearch() {
 
   const activeDisplayWord = selectedWord || dailyWord;
 
-  // Translation & Meaning Handler
   useEffect(() => {
     const translateAllContent = async () => {
       if (!activeDisplayWord) return;
       setTranslating(true);
 
       try {
-        // Badge Meaning Logic: English ya Hindi hone par Hindi meaning show hogi
-        if (selectedLang === "en" || selectedLang === "hi") {
-          if (
-            activeDisplayWord.hindiMeaning &&
-            activeDisplayWord.hindiMeaning.trim() !== ""
-          ) {
-            setCurrentMeaningText(activeDisplayWord.hindiMeaning);
-          } else {
-            const hindiTrans = await fetchClientTranslation(
-              activeDisplayWord.word,
-              "hi",
-            );
-            setCurrentMeaningText(hindiTrans);
-          }
+        // Target language for the meaning badge
+        const badgeTargetLang = selectedLang === "en" ? "hi" : selectedLang;
+
+        // If it's Hindi/English selection and backend already has a valid Hindi meaning
+        if (
+          (selectedLang === "en" || selectedLang === "hi") &&
+          activeDisplayWord.hindiMeaning &&
+          activeDisplayWord.hindiMeaning.toLowerCase() !==
+            activeDisplayWord.word.toLowerCase()
+        ) {
+          setCurrentMeaningText(activeDisplayWord.hindiMeaning);
         } else {
-          const baseSource =
-            activeDisplayWord.hindiMeaning || activeDisplayWord.word;
-          const regTrans = await fetchClientTranslation(
-            baseSource,
-            selectedLang,
+          // Translate English word cleanly to the target language
+          const translatedBadge = await fetchClientTranslation(
+            activeDisplayWord.word,
+            badgeTargetLang,
           );
-          setCurrentMeaningText(regTrans);
+          setCurrentMeaningText(translatedBadge);
         }
 
-        // Definitions & Examples Logic: English hone par original English
+        // Detailed definitions & examples handling
         if (selectedLang === "en") {
           setTranslatedMeaningsList(activeDisplayWord.meanings || []);
           setTranslating(false);
           return;
         }
 
-        // Regional languages ke liye definitions translation
         if (
           activeDisplayWord.meanings &&
           activeDisplayWord.meanings.length > 0
@@ -273,7 +269,7 @@ export default function DictionarySearch() {
     activeDisplayWord &&
     bookmarks.includes(activeDisplayWord.word?.toLowerCase());
 
-  // Badge Title: English aur Hindi dono par 'हिन्दी' title aayega
+  // Badge Title Label: English ya Hindi hone par 'हिन्दी', anyatha chuni hui bhasha ka naam
   const badgeLanguageLabel =
     selectedLang === "en" || selectedLang === "hi"
       ? "हिन्दी"
@@ -456,7 +452,7 @@ export default function DictionarySearch() {
 
           <input
             type="text"
-            placeholder="अंग्रेजी शब्द खोजें (उदा. dedicate, achieve)..."
+            placeholder="अंग्रेजी शब्द खोजें (उदा. peacock, dedicate)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
