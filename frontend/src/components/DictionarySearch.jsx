@@ -18,8 +18,8 @@ import AudioPlayer from "./AudioPlayer";
 import BookmarksList from "./BookmarksList";
 
 const SUPPORTED_LANGUAGES = [
-  { code: "hi", label: "हिन्दी (Hindi)" },
   { code: "en", label: "English" },
+  { code: "hi", label: "हिन्दी (Hindi)" },
   { code: "pa", label: "ਪੰਜਾਬੀ (Punjabi)" },
   { code: "ur", label: "اردو (Urdu)" },
   { code: "bn", label: "বাংলা (Bengali)" },
@@ -32,7 +32,7 @@ const SUPPORTED_LANGUAGES = [
 const API_BASE_URL = "";
 
 async function fetchClientTranslation(text, targetLang) {
-  if (!text || targetLang === "en") return text;
+  if (!text) return "";
   try {
     const res = await fetch(
       `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`,
@@ -52,7 +52,8 @@ async function fetchClientTranslation(text, targetLang) {
 
 export default function DictionarySearch() {
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedLang, setSelectedLang] = useState("hi");
+  // By default English selected rahegi
+  const [selectedLang, setSelectedLang] = useState("en");
   const [suggestions, setSuggestions] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedWord, setSelectedWord] = useState(null);
@@ -126,28 +127,45 @@ export default function DictionarySearch() {
 
   const activeDisplayWord = selectedWord || dailyWord;
 
+  // Translation & Meaning Handler
   useEffect(() => {
     const translateAllContent = async () => {
       if (!activeDisplayWord) return;
       setTranslating(true);
 
       try {
-        if (selectedLang === "hi" && activeDisplayWord.hindiMeaning) {
-          setCurrentMeaningText(activeDisplayWord.hindiMeaning);
+        // Badge Meaning Logic: English ya Hindi hone par Hindi meaning show hogi
+        if (selectedLang === "en" || selectedLang === "hi") {
+          if (
+            activeDisplayWord.hindiMeaning &&
+            activeDisplayWord.hindiMeaning.trim() !== ""
+          ) {
+            setCurrentMeaningText(activeDisplayWord.hindiMeaning);
+          } else {
+            const hindiTrans = await fetchClientTranslation(
+              activeDisplayWord.word,
+              "hi",
+            );
+            setCurrentMeaningText(hindiTrans);
+          }
         } else {
-          const mainTrans = await fetchClientTranslation(
-            activeDisplayWord.word,
+          const baseSource =
+            activeDisplayWord.hindiMeaning || activeDisplayWord.word;
+          const regTrans = await fetchClientTranslation(
+            baseSource,
             selectedLang,
           );
-          setCurrentMeaningText(mainTrans);
+          setCurrentMeaningText(regTrans);
         }
 
+        // Definitions & Examples Logic: English hone par original English
         if (selectedLang === "en") {
           setTranslatedMeaningsList(activeDisplayWord.meanings || []);
           setTranslating(false);
           return;
         }
 
+        // Regional languages ke liye definitions translation
         if (
           activeDisplayWord.meanings &&
           activeDisplayWord.meanings.length > 0
@@ -254,20 +272,25 @@ export default function DictionarySearch() {
   const isCurrentBookmarked =
     activeDisplayWord &&
     bookmarks.includes(activeDisplayWord.word?.toLowerCase());
-  const currentLangObj =
-    SUPPORTED_LANGUAGES.find((l) => l.code === selectedLang) ||
-    SUPPORTED_LANGUAGES[0];
+
+  // Badge Title: English aur Hindi dono par 'हिन्दी' title aayega
+  const badgeLanguageLabel =
+    selectedLang === "en" || selectedLang === "hi"
+      ? "हिन्दी"
+      : SUPPORTED_LANGUAGES.find((l) => l.code === selectedLang)?.label.split(
+          " ",
+        )[0] || "अर्थ";
 
   const meaningsToRender =
-    translatedMeaningsList.length > 0
+    selectedLang !== "en" && translatedMeaningsList.length > 0
       ? translatedMeaningsList
       : activeDisplayWord
         ? activeDisplayWord.meanings
         : [];
 
   return (
-    <div className="w-full max-w-3xl mx-auto px-2 sm:px-4">
-      {/* 1. Hero Card - Fully Mobile Optimized */}
+    <div className="w-full max-w-3xl mx-auto px-1 sm:px-4">
+      {/* 1. Hero Card */}
       {activeDisplayWord && (
         <div className="mb-6 relative group">
           <div
@@ -278,7 +301,7 @@ export default function DictionarySearch() {
             }`}
           ></div>
 
-          <div className="relative rounded-2xl sm:rounded-3xl p-4 sm:p-7 bg-slate-900/95 backdrop-blur-xl border border-slate-800/90 shadow-xl">
+          <div className="relative rounded-2xl sm:rounded-3xl p-4 sm:p-7 bg-slate-900/95 dark:bg-slate-900/95 border border-slate-800 shadow-xl">
             {/* Top Badges */}
             <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
               {isSearchMode ? (
@@ -331,7 +354,7 @@ export default function DictionarySearch() {
                   )}
                 </div>
 
-                {/* Multilingual Meaning Tag */}
+                {/* Multilingual Meaning Badge */}
                 {currentMeaningText && (
                   <div className="inline-flex items-center gap-2 max-w-full text-xs sm:text-sm font-semibold text-emerald-300 bg-emerald-950/80 border border-emerald-600/70 px-3 py-1.5 rounded-xl shadow-sm">
                     {translating ? (
@@ -340,7 +363,7 @@ export default function DictionarySearch() {
                       <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
                     )}
                     <span className="truncate">
-                      {currentLangObj.label.split(" ")[0]} अर्थ:{" "}
+                      {badgeLanguageLabel} अर्थ:{" "}
                       <strong className="text-white">
                         {currentMeaningText}
                       </strong>
@@ -388,7 +411,7 @@ export default function DictionarySearch() {
         </div>
       )}
 
-      {/* 2. Language Selector & Search Form */}
+      {/* 2. Language Selector & Search Bar */}
       <div ref={dropdownRef} className="relative z-20 space-y-3">
         <div className="flex items-center justify-between gap-2 px-1">
           <div className="flex items-center gap-1.5 text-xs font-medium text-slate-400">
@@ -419,7 +442,7 @@ export default function DictionarySearch() {
           </select>
         </div>
 
-        {/* Input Bar */}
+        {/* Search Input Bar */}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -433,7 +456,7 @@ export default function DictionarySearch() {
 
           <input
             type="text"
-            placeholder="अंग्रेजी शब्द खोजें (उदा. urgent, achieve)..."
+            placeholder="अंग्रेजी शब्द खोजें (उदा. dedicate, achieve)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
@@ -453,7 +476,7 @@ export default function DictionarySearch() {
           </button>
         </form>
 
-        {/* Suggestions List */}
+        {/* Auto Suggestions */}
         {showDropdown && suggestions.length > 0 && (
           <ul className="absolute left-0 right-0 mt-1 bg-slate-900/98 backdrop-blur-xl border border-slate-800 rounded-xl shadow-2xl overflow-hidden z-30 divide-y divide-slate-800/80">
             {suggestions.map((item, idx) => (
@@ -476,7 +499,7 @@ export default function DictionarySearch() {
           </ul>
         )}
 
-        {/* Recent Searches - Compact Wrap */}
+        {/* Recent Searches */}
         {history.length > 0 && (
           <div className="pt-1 flex items-center justify-between gap-2 flex-wrap text-xs text-slate-400">
             <div className="flex items-center gap-1.5 flex-wrap">
