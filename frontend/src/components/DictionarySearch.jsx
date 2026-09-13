@@ -5,7 +5,6 @@ import {
   Star,
   Loader2,
   Sparkles,
-  Database,
   BookOpenCheck,
   Calendar,
   SearchCheck,
@@ -31,21 +30,18 @@ const SUPPORTED_LANGUAGES = [
 
 const API_BASE_URL = "";
 
-// Translation helper: explicitly enforce English as source language
 async function fetchClientTranslation(text, targetLang) {
   if (!text) return "";
-  if (targetLang === "en") return text;
   try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
-    const res = await fetch(url);
+    const res = await fetch(
+      `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`,
+    );
     const data = await res.json();
     if (data && data[0] && Array.isArray(data[0])) {
-      const translated = data[0]
+      return data[0]
         .map((item) => item[0])
         .filter(Boolean)
-        .join(" ")
-        .trim();
-      return translated || text;
+        .join(" ");
     }
     return text;
   } catch (err) {
@@ -60,7 +56,6 @@ export default function DictionarySearch() {
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedWord, setSelectedWord] = useState(null);
   const [dailyWord, setDailyWord] = useState(null);
-  const [dataSource, setDataSource] = useState("");
   const [loading, setLoading] = useState(false);
   const [translating, setTranslating] = useState(false);
   const [error, setError] = useState("");
@@ -135,27 +130,29 @@ export default function DictionarySearch() {
       setTranslating(true);
 
       try {
-        // Target language for the meaning badge
-        const badgeTargetLang = selectedLang === "en" ? "hi" : selectedLang;
-
-        // If it's Hindi/English selection and backend already has a valid Hindi meaning
-        if (
-          (selectedLang === "en" || selectedLang === "hi") &&
-          activeDisplayWord.hindiMeaning &&
-          activeDisplayWord.hindiMeaning.toLowerCase() !==
-            activeDisplayWord.word.toLowerCase()
-        ) {
-          setCurrentMeaningText(activeDisplayWord.hindiMeaning);
+        if (selectedLang === "en" || selectedLang === "hi") {
+          if (
+            activeDisplayWord.hindiMeaning &&
+            activeDisplayWord.hindiMeaning.trim() !== ""
+          ) {
+            setCurrentMeaningText(activeDisplayWord.hindiMeaning);
+          } else {
+            const hindiTrans = await fetchClientTranslation(
+              activeDisplayWord.word,
+              "hi",
+            );
+            setCurrentMeaningText(hindiTrans);
+          }
         } else {
-          // Translate English word cleanly to the target language
-          const translatedBadge = await fetchClientTranslation(
-            activeDisplayWord.word,
-            badgeTargetLang,
+          const baseSource =
+            activeDisplayWord.hindiMeaning || activeDisplayWord.word;
+          const regTrans = await fetchClientTranslation(
+            baseSource,
+            selectedLang,
           );
-          setCurrentMeaningText(translatedBadge);
+          setCurrentMeaningText(regTrans);
         }
 
-        // Detailed definitions & examples handling
         if (selectedLang === "en") {
           setTranslatedMeaningsList(activeDisplayWord.meanings || []);
           setTranslating(false);
@@ -245,7 +242,6 @@ export default function DictionarySearch() {
       }
 
       setSelectedWord(data.data);
-      setDataSource(data.source || "database");
       addToHistory(query);
       setSearchTerm(query);
     } catch (err) {
@@ -269,7 +265,6 @@ export default function DictionarySearch() {
     activeDisplayWord &&
     bookmarks.includes(activeDisplayWord.word?.toLowerCase());
 
-  // Badge Title Label: English ya Hindi hone par 'हिन्दी', anyatha chuni hui bhasha ka naam
   const badgeLanguageLabel =
     selectedLang === "en" || selectedLang === "hi"
       ? "हिन्दी"
@@ -325,29 +320,6 @@ export default function DictionarySearch() {
                   <h3 className="text-2xl sm:text-4xl font-extrabold text-white capitalize tracking-tight break-words">
                     {activeDisplayWord.word}
                   </h3>
-
-                  {activeDisplayWord.phonetic && (
-                    <span className="text-xs sm:text-sm font-mono text-indigo-300 bg-indigo-950/60 border border-indigo-800/60 px-2 py-0.5 rounded-lg">
-                      {activeDisplayWord.phonetic}
-                    </span>
-                  )}
-
-                  {isSearchMode && dataSource && (
-                    <span
-                      className={`inline-flex items-center gap-1 text-[10px] sm:text-xs px-2 py-0.5 rounded-full font-semibold border ${
-                        dataSource === "database"
-                          ? "bg-emerald-950/60 text-emerald-400 border-emerald-800"
-                          : "bg-amber-950/60 text-amber-400 border-amber-800"
-                      }`}
-                    >
-                      {dataSource === "database" ? (
-                        <Database className="w-3 h-3" />
-                      ) : (
-                        <Sparkles className="w-3 h-3" />
-                      )}
-                      {dataSource === "database" ? "Local DB" : "Live"}
-                    </span>
-                  )}
                 </div>
 
                 {/* Multilingual Meaning Badge */}
@@ -452,7 +424,7 @@ export default function DictionarySearch() {
 
           <input
             type="text"
-            placeholder="अंग्रेजी शब्द खोजें (उदा. peacock, dedicate)..."
+            placeholder="अंग्रेजी शब्द खोजें (उदा. dedicate, achieve)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
