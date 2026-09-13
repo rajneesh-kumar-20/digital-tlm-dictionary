@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 const Word = require("../models/word");
 
-// Helper function: Free Google Translate endpoint
+// Free Google Translate Engine
 async function translateText(text, targetLang = "hi") {
   if (!text || targetLang === "en") return text;
   try {
@@ -23,12 +23,11 @@ async function translateText(text, targetLang = "hi") {
     }
     return text;
   } catch (err) {
-    console.error("Translation error:", err.message);
     return text;
   }
 }
 
-// 1. Search Word with Multilingual Support
+// 1. Universal Search: MongoDB -> Live Dictionary API -> Auto-save
 router.get("/search", async (req, res) => {
   try {
     const query = req.query.q ? req.query.q.trim().toLowerCase() : "";
@@ -40,57 +39,79 @@ router.get("/search", async (req, res) => {
         .json({ success: false, message: "शब्द देना आवश्यक है" });
     }
 
+    // Pehle MongoDB check karein
     let wordDoc = await Word.findOne({ word: new RegExp(`^${query}$`, "i") });
     let source = "database";
 
+    // Agar MongoDB mein nahi mila -> Live Free Dictionary API se fetch karein
     if (!wordDoc) {
       try {
         const extRes = await fetch(
           `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(query)}`,
+          {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            },
+          },
         );
-        if (!extRes.ok) {
-          return res
-            .status(404)
-            .json({
-              success: false,
-              message: `शब्द "${query}" शब्दकोश में नहीं मिला।`,
+
+        if (extRes.ok) {
+          const dataArray = await extRes.json();
+          const apiData = dataArray[0];
+
+          const meanings = (apiData.meanings || []).map((m) => ({
+            partOfSpeech: m.partOfSpeech || "noun",
+            definitions: (m.definitions || []).map((d) => d.definition),
+            examples: (m.definitions || [])
+              .filter((d) => d.example)
+              .map((d) => d.example),
+          }));
+
+          const audio =
+            apiData.phonetics?.find((p) => p.audio && p.audio.trim() !== "")
+              ?.audio || "";
+
+          // Automatic Hindi translation create karein
+          const translatedHindi = await translateText(apiData.word, "hi");
+
+          // Naye word ko database mein save kar dein taaki agli baar 0ms mein mile
+          try {
+            wordDoc = await Word.create({
+              word: apiData.word.toLowerCase(),
+              phonetic: apiData.phonetic || apiData.phonetics?.[0]?.text || "",
+              audioUrl: audio,
+              meanings: meanings,
+              hindiMeaning: translatedHindi,
             });
+          } catch (dbSaveErr) {
+            wordDoc = {
+              word: apiData.word,
+              phonetic: apiData.phonetic || "",
+              audioUrl: audio,
+              meanings: meanings,
+              hindiMeaning: translatedHindi,
+            };
+          }
+
+          source = "online-live";
         }
-
-        const [apiData] = await extRes.json();
-        const meanings = (apiData.meanings || []).map((m) => ({
-          partOfSpeech: m.partOfSpeech,
-          definitions: (m.definitions || []).map((d) => d.definition),
-          examples: (m.definitions || [])
-            .filter((d) => d.example)
-            .map((d) => d.example),
-        }));
-
-        const audio =
-          apiData.phonetics?.find((p) => p.audio && p.audio.trim() !== "")
-            ?.audio || "";
-
-        wordDoc = new Word({
-          word: apiData.word,
-          phonetic: apiData.phonetic || "",
-          audioUrl: audio,
-          meanings: meanings,
-          hindiMeaning: "",
-        });
-
-        source = "api";
       } catch (fetchErr) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Word lookup failed" });
+        console.error("Online lookup error:", fetchErr);
       }
     }
 
-    const baseText =
-      wordDoc.hindiMeaning ||
-      wordDoc.meanings?.[0]?.definitions?.[0] ||
-      wordDoc.word;
-    const translatedText = await translateText(baseText, targetLang);
+    if (!wordDoc) {
+      return res.status(404).json({
+        success: false,
+        message: `शब्द "${query}" शब्दकोश में नहीं मिला। कृपया स्पेलिंग जांचें।`,
+      });
+    }
+
+    const baseText = wordDoc.hindiMeaning || wordDoc.word;
+    const translatedText =
+      targetLang === "hi" || targetLang === "en"
+        ? wordDoc.hindiMeaning || (await translateText(wordDoc.word, "hi"))
+        : await translateText(baseText, targetLang);
 
     const result = wordDoc.toObject ? wordDoc.toObject() : { ...wordDoc };
     result.translatedMeaning = translatedText;
@@ -102,8 +123,8 @@ router.get("/search", async (req, res) => {
       source: source,
     });
   } catch (error) {
-    console.error("Search Route Error:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
+    console.error("Server error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
@@ -113,15 +134,32 @@ router.get("/suggestions", async (req, res) => {
     const query = req.query.q ? req.query.q.trim().toLowerCase() : "";
     if (!query) return res.json({ success: true, data: [] });
 
-    const words = await Word.find({
+    let words = await Word.find({
       word: { $regex: `^${query}`, $options: "i" },
     })
-      .limit(6)
+      .limit(5)
       .select("word -_id");
+
+    let suggestions = words.map((w) => w.word);
+
+    if (suggestions.length < 5) {
+      try {
+        const extSuggest = await fetch(
+          `https://api.datamuse.com/sug?s=${encodeURIComponent(query)}&max=5`,
+        );
+        if (extSuggest.ok) {
+          const onlineItems = await extSuggest.json();
+          const onlineWords = onlineItems.map((item) => item.word);
+          suggestions = Array.from(
+            new Set([...suggestions, ...onlineWords]),
+          ).slice(0, 6);
+        }
+      } catch (e) {}
+    }
 
     res.json({
       success: true,
-      data: words.map((w) => w.word),
+      data: suggestions,
     });
   } catch (error) {
     res.json({ success: true, data: [] });
@@ -131,7 +169,6 @@ router.get("/suggestions", async (req, res) => {
 // 3. Word of the Day Route
 router.get("/word-of-the-day", async (req, res) => {
   try {
-    const targetLang = req.query.lang || "hi";
     const count = await Word.countDocuments();
     let wordDoc;
 
@@ -152,24 +189,15 @@ router.get("/word-of-the-day", async (req, res) => {
           {
             partOfSpeech: "verb",
             definitions: [
-              "To succeed in something, especially in academic performance.",
+              "Successfully bring about or reach a desired objective or result by effort.",
             ],
           },
         ],
-        hindiMeaning: "हासिल करना",
+        hindiMeaning: "हासिल करना / प्राप्त करना",
       };
     }
 
-    const baseText =
-      wordDoc.hindiMeaning ||
-      wordDoc.meanings?.[0]?.definitions?.[0] ||
-      wordDoc.word;
-    const translatedText = await translateText(baseText, targetLang);
-
-    const result = wordDoc.toObject ? wordDoc.toObject() : { ...wordDoc };
-    result.translatedMeaning = translatedText;
-
-    res.json({ success: true, data: result });
+    res.json({ success: true, data: wordDoc });
   } catch (error) {
     res.status(500).json({ success: false, message: "Server error" });
   }
