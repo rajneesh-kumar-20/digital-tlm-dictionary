@@ -1,41 +1,46 @@
 // Backend/server.js
-const dns = require("dns");
-try {
-  dns.setServers(["8.8.8.8", "8.8.4.4"]);
-} catch (e) {
-  // Ignored if not permitted in environment
-}
-
 const express = require("express");
+const mongoose = require("mongoose");
 const cors = require("cors");
 const path = require("path");
-const dotenv = require("dotenv");
-const connectDB = require("./config/db");
-
-dotenv.config();
-
-// Connect Database
-connectDB();
+require("dotenv").config();
 
 const app = express();
 
-// Middlewares
 app.use(cors());
 app.use(express.json());
 
-// 1. API Routes
-app.use("/api/words", require("./routes/dictionaryRoutes"));
+// MongoDB connection
+const MONGO_URI =
+  process.env.MONGO_URI || "mongodb://localhost:27017/digital-tlm";
+mongoose
+  .connect(MONGO_URI)
+  .then(() => console.log("MongoDB connected successfully"))
+  .catch((err) => console.error("MongoDB connection error:", err));
 
-// 2. Serve React Frontend Build
-const frontendDistPath = path.join(__dirname, "../frontend/dist");
-app.use(express.static(frontendDistPath));
+// Route Imports
+const dictionaryRoutes = require("./routes/dictionaryRoutes");
+const teacherRoutes = require("./routes/teacherRoutes");
 
-// 3. React SPA Fallback (Express v5 Compatible Catch-all)
-app.use((req, res) => {
-  res.sendFile(path.join(frontendDistPath, "index.html"));
-});
+// Mount API Routes
+if (dictionaryRoutes) {
+  app.use("/api/words", dictionaryRoutes);
+}
 
-const PORT = process.env.PORT || 8080;
+if (teacherRoutes) {
+  app.use("/api/teacher", teacherRoutes);
+}
+
+// Frontend static build serving (Production)
+// Express v5 / path-to-regexp compatible wildcard: /(.*)/
+if (process.env.NODE_ENV === "production") {
+  app.use(express.static(path.join(__dirname, "../frontend/dist")));
+  app.get(/(.*)/, (req, res) => {
+    res.sendFile(path.join(__dirname, "../frontend/dist", "index.html"));
+  });
+}
+
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Single Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
