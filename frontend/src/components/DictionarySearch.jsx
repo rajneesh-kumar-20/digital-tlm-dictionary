@@ -11,6 +11,9 @@ import {
   Languages,
   RotateCcw,
   Trash2,
+  ArrowLeft,
+  Mic,
+  MicOff,
 } from "lucide-react";
 import { useDebounce } from "../hooks/useDebounce";
 import AudioPlayer from "./AudioPlayer";
@@ -49,7 +52,7 @@ async function fetchClientTranslation(text, targetLang) {
   }
 }
 
-export default function DictionarySearch() {
+export default function DictionarySearch({ onWordChange }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedLang, setSelectedLang] = useState("en");
   const [suggestions, setSuggestions] = useState([]);
@@ -58,6 +61,7 @@ export default function DictionarySearch() {
   const [dailyWord, setDailyWord] = useState(null);
   const [loading, setLoading] = useState(false);
   const [translating, setTranslating] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState("");
 
   const [currentMeaningText, setCurrentMeaningText] = useState("");
@@ -75,6 +79,13 @@ export default function DictionarySearch() {
 
   const debouncedQuery = useDebounce(searchTerm, 300);
   const dropdownRef = useRef(null);
+  const searchJustSubmitted = useRef(false);
+
+  const todayFormattedDate = new Date().toLocaleDateString("hi-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 
   useEffect(() => {
     const getDailyWord = async () => {
@@ -84,6 +95,7 @@ export default function DictionarySearch() {
         const data = await res.json();
         if (data.success) {
           setDailyWord(data.data);
+          if (onWordChange) onWordChange(data.data);
         }
       } catch (err) {
         console.error("Word of the day error:", err);
@@ -101,9 +113,15 @@ export default function DictionarySearch() {
   }, [history]);
 
   useEffect(() => {
+    if (searchJustSubmitted.current) {
+      searchJustSubmitted.current = false;
+      return;
+    }
+
     const fetchSuggestions = async () => {
       if (!debouncedQuery.trim()) {
         setSuggestions([]);
+        setShowDropdown(false);
         return;
       }
       try {
@@ -111,7 +129,7 @@ export default function DictionarySearch() {
           `${API_BASE_URL}/api/words/suggestions?q=${encodeURIComponent(debouncedQuery)}`,
         );
         const data = await res.json();
-        if (data.success) {
+        if (data.success && !searchJustSubmitted.current) {
           setSuggestions(data.data);
           setShowDropdown(data.data.length > 0);
         }
@@ -123,6 +141,12 @@ export default function DictionarySearch() {
   }, [debouncedQuery]);
 
   const activeDisplayWord = selectedWord || dailyWord;
+
+  useEffect(() => {
+    if (activeDisplayWord && onWordChange) {
+      onWordChange(activeDisplayWord);
+    }
+  }, [activeDisplayWord]);
 
   useEffect(() => {
     const translateAllContent = async () => {
@@ -218,12 +242,15 @@ export default function DictionarySearch() {
   };
 
   const fetchWordDetails = async (wordToFetch) => {
-    const query = (wordToFetch || searchTerm).trim();
+    const query = (wordToFetch !== undefined ? wordToFetch : searchTerm).trim();
     if (!query) return;
 
+    searchJustSubmitted.current = true;
+    setShowDropdown(false);
+    setSuggestions([]);
+    setSearchTerm(query);
     setLoading(true);
     setError("");
-    setShowDropdown(false);
 
     try {
       const res = await fetch(
@@ -243,12 +270,62 @@ export default function DictionarySearch() {
 
       setSelectedWord(data.data);
       addToHistory(query);
-      setSearchTerm(query);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Voice Search Web Speech API
+  const handleVoiceSearch = () => {
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert(
+        "Aapka browser voice recognition support nahi karta. Kripya Chrome ya Edge browser use karein.",
+      );
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event) => {
+      const spoken = event.results[0][0].transcript
+        .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "")
+        .trim();
+      if (spoken) {
+        setSearchTerm(spoken);
+        fetchWordDetails(spoken);
+      }
+      setIsListening(false);
+    };
+
+    recognition.onerror = () => {
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.start();
+  };
+
+  const resetToDailyWord = () => {
+    searchJustSubmitted.current = true;
+    setSelectedWord(null);
+    setSearchTerm("");
+    setShowDropdown(false);
+    setSuggestions([]);
+    setError("");
   };
 
   const toggleBookmark = (word) => {
@@ -285,15 +362,15 @@ export default function DictionarySearch() {
       {activeDisplayWord && (
         <div className="mb-6 relative group">
           <div
-            className={`absolute -inset-0.5 rounded-2xl sm:rounded-3xl blur-md opacity-40 transition duration-500 ${
+            className={`absolute -inset-0.5 rounded-2xl sm:rounded-3xl blur-md opacity-40 transition duration-500 pointer-events-none ${
               isSearchMode
                 ? "bg-gradient-to-r from-emerald-500/30 via-indigo-500/30 to-teal-500/30"
                 : "bg-gradient-to-r from-amber-500/30 via-indigo-500/30 to-purple-500/30"
             }`}
           ></div>
 
-          <div className="relative rounded-2xl sm:rounded-3xl p-4 sm:p-7 bg-slate-900/95 dark:bg-slate-900/95 border border-slate-800 shadow-xl">
-            {/* Top Badges */}
+          <div className="relative z-10 rounded-2xl sm:rounded-3xl p-4 sm:p-7 bg-slate-900/95 dark:bg-slate-900/95 border border-slate-800 shadow-xl">
+            {/* Top Bar */}
             <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
               {isSearchMode ? (
                 <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold uppercase tracking-wider bg-emerald-500 text-slate-950 shadow-sm">
@@ -307,13 +384,24 @@ export default function DictionarySearch() {
                 </div>
               )}
 
-              <div className="text-[11px] sm:text-xs font-medium text-slate-400 flex items-center gap-1.5 bg-slate-800/80 px-2.5 py-0.5 rounded-full border border-slate-700/40 ml-auto">
-                <Calendar className="w-3 h-3 text-indigo-400" />
-                <span>दैनिक TLM</span>
-              </div>
+              {isSearchMode ? (
+                <button
+                  type="button"
+                  onClick={resetToDailyWord}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white shadow-md transition-all cursor-pointer ml-auto"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>आज का शब्द देखें</span>
+                </button>
+              ) : (
+                <div className="text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/80 text-indigo-300 border border-slate-700/60 ml-auto">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>{todayFormattedDate}</span>
+                </div>
+              )}
             </div>
 
-            {/* Word Details & Action Buttons */}
+            {/* Word Details */}
             <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
               <div className="space-y-2.5 flex-1 min-w-0">
                 <div className="flex items-center gap-2.5 flex-wrap">
@@ -322,7 +410,6 @@ export default function DictionarySearch() {
                   </h3>
                 </div>
 
-                {/* Multilingual Meaning Badge */}
                 {currentMeaningText && (
                   <div className="inline-flex items-center gap-2 max-w-full text-xs sm:text-sm font-semibold text-emerald-300 bg-emerald-950/80 border border-emerald-600/70 px-3 py-1.5 rounded-xl shadow-sm">
                     {translating ? (
@@ -353,6 +440,7 @@ export default function DictionarySearch() {
                 />
 
                 <button
+                  type="button"
                   onClick={() => toggleBookmark(activeDisplayWord.word)}
                   title={
                     isCurrentBookmarked
@@ -379,7 +467,7 @@ export default function DictionarySearch() {
         </div>
       )}
 
-      {/* 2. Language Selector & Search Bar */}
+      {/* 2. Search Area */}
       <div ref={dropdownRef} className="relative z-20 space-y-3">
         <div className="flex items-center justify-between gap-2 px-1">
           <div className="flex items-center gap-1.5 text-xs font-medium text-slate-400">
@@ -410,7 +498,7 @@ export default function DictionarySearch() {
           </select>
         </div>
 
-        {/* Search Input Bar */}
+        {/* Search Input Bar with Voice Button */}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -426,15 +514,40 @@ export default function DictionarySearch() {
             type="text"
             placeholder="अंग्रेजी शब्द खोजें (उदा. dedicate, achieve)..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
+            onChange={(e) => {
+              searchJustSubmitted.current = false;
+              setSearchTerm(e.target.value);
+            }}
+            onFocus={() => {
+              if (suggestions.length > 0 && !searchJustSubmitted.current) {
+                setShowDropdown(true);
+              }
+            }}
             className="w-full py-2 bg-transparent text-white placeholder-slate-500 focus:outline-none text-sm sm:text-base min-w-0"
           />
+
+          {/* Voice Search Button */}
+          <button
+            type="button"
+            onClick={handleVoiceSearch}
+            title={isListening ? "Listening..." : "Voice Search (बोलकर खोजें)"}
+            className={`p-2 rounded-lg sm:rounded-xl border transition-all cursor-pointer mr-1 shrink-0 ${
+              isListening
+                ? "bg-rose-500/20 text-rose-400 border-rose-500 animate-pulse"
+                : "bg-slate-800 text-slate-400 border-slate-700 hover:text-indigo-300"
+            }`}
+          >
+            {isListening ? (
+              <MicOff className="w-4 h-4 animate-bounce" />
+            ) : (
+              <Mic className="w-4 h-4" />
+            )}
+          </button>
 
           <button
             type="submit"
             disabled={loading}
-            className="px-4 sm:px-6 py-2.5 rounded-lg sm:rounded-xl font-bold text-xs sm:text-sm text-white bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-60 shrink-0 ml-1"
+            className="px-4 sm:px-6 py-2.5 rounded-lg sm:rounded-xl font-bold text-xs sm:text-sm text-white bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-60 shrink-0"
           >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -444,14 +557,17 @@ export default function DictionarySearch() {
           </button>
         </form>
 
-        {/* Auto Suggestions */}
+        {/* Suggestions Box */}
         {showDropdown && suggestions.length > 0 && (
           <ul className="absolute left-0 right-0 mt-1 bg-slate-900/98 backdrop-blur-xl border border-slate-800 rounded-xl shadow-2xl overflow-hidden z-30 divide-y divide-slate-800/80">
             {suggestions.map((item, idx) => (
               <li
                 key={idx}
-                onClick={() => fetchWordDetails(item)}
-                className="px-4 py-2.5 hover:bg-indigo-600/15 text-slate-200 cursor-pointer text-xs sm:text-sm flex items-center justify-between transition-colors"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  fetchWordDetails(item);
+                }}
+                className="px-4 py-2.5 hover:bg-indigo-600/20 active:bg-indigo-600/30 text-slate-200 cursor-pointer text-xs sm:text-sm flex items-center justify-between transition-colors"
               >
                 <div className="flex items-center gap-2.5">
                   <Search className="w-3.5 h-3.5 text-indigo-400" />
@@ -477,6 +593,7 @@ export default function DictionarySearch() {
               {history.map((word, idx) => (
                 <button
                   key={idx}
+                  type="button"
                   onClick={() => fetchWordDetails(word)}
                   className="bg-slate-800/70 hover:bg-slate-700 text-slate-300 text-[11px] px-2 py-0.5 rounded-md border border-slate-700/60 transition-colors"
                 >
@@ -486,6 +603,7 @@ export default function DictionarySearch() {
             </div>
 
             <button
+              type="button"
               onClick={() => setHistory([])}
               className="text-[11px] text-slate-400 hover:text-rose-400 flex items-center gap-1 transition-colors ml-auto"
               title="Clear history"
